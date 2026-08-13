@@ -1,0 +1,115 @@
+pipeline:
+  name: build-scan-push
+  identifier: build_scan_push
+  projectIdentifier: <+input>
+  orgIdentifier: <+input>
+  tags: {}
+  stages:
+    - stage:
+        name: Build and Scan
+        identifier: build_and_scan
+        description: Build image, run SAST on code and SCA on container image
+        type: CI
+        spec:
+          cloneCodebase: true
+          # Use Harness Cloud for zero-infra builds — delegates and K8s clusters not needed
+          platform:
+            os: Linux
+            arch: Amd64
+          runtime:
+            type: Cloud
+            spec: {}
+          # Shared path required for any step that writes scan artifacts
+          sharedPaths:
+            - /var/run
+          execution:
+            steps:
+              # ── Step 1: SAST scan on cloned source code ──────────────────────
+              # Native Bandit step — no shell script, no custom image to maintain
+              - step:
+                  type: Bandit
+                  name: bandit_sast_scan
+                  identifier: bandit_sast_scan
+                  spec:
+                    mode: orchestration        # Runs scanner AND ingests results in one step
+                    config: default
+                    target:
+                      type: repository
+                      name: <+stage.variables.REPO_NAME>
+                      variant: <+stage.variables.BRANCH_NAME>
+                    advanced:
+                      log:
+                        level: info
+                      fail_on_severity: high   # Pipeline fails on High or Critical findings
+
+              # ── Step 2: Build and push Docker image ───────────────────────────
+              - step:
+                  type: BuildAndPushDockerRegistry
+                  name: build_and_push
+                  identifier: build_and_push
+                  spec:
+                    connectorRef: <+input>     # Your Docker Hub or ECR connector
+                    repo: <+stage.variables.IMAGE_REPO>
+                    tags:
+                      - <+stage.variables.IMAGE_TAG>
+                    dockerfile: Dockerfile
+                    context: .
+
+              # ── Step 3: Container SCA scan on the image just built ────────────
+              # Native AquaTrivy step — no DinD background step needed on Harness Cloud
+              - step:
+                  type: AquaTrivy
+                  name: trivy_container_scan
+                  identifier: trivy_container_scan
+                  spec:
+                    mode: orchestration        # Runs Trivy and ingests results in one step
+                    config: default
+                    target:
+                      type: container
+                      name: <+stage.variables.IMAGE_REPO>
+                      variant: <+stage.variables.IMAGE_TAG>
+                    image:
+                      type: local_image        # Scan the image built in the previous step
+                      name: <+stage.variables.IMAGE_REPO>
+                      tag: <+stage.variables.IMAGE_TAG>
+                    privileged: true
+                    advanced:
+                      log:
+                        level: info
+                      fail_on_severity: critical  # Only block on Critical CVEs for containers
+
+          # ── Stage Variables ──────────────────────────────────────────────────
+          # Set these as fixed values or leave as <+input> for runtime prompts
+        variables:
+          - name: REPO_NAME
+            type: String
+            description: Git repository name (used as scan target name)
+            required: true
+            value: <+input>
+          - name: BRANCH_NAME
+            type: String
+            description: Git branch being scanned (used as scan target variant)
+            required: true
+            value: <+input>
+          - name: IMAGE_REPO
+            type: String
+            description: Docker image repository (e.g., myorg/myapp)
+            required: true
+            value: <+input>
+          - name: IMAGE_TAG
+            type: String
+            description: Docker image tag (e.g., 1.0.0 or git commit SHA)
+            required: true
+            value: <+input>
+
+  # ── Codebase configuration ─────────────────────────────────────────────────
+  # Replace with your actual code connector and repository
+  properties:
+    ci:
+      codebase:
+        connectorRef: <+input>
+        repoName: <+input>
+        build:
+          type: branch
+          spec:
+            branch: <+input>
