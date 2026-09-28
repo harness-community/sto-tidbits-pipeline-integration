@@ -1,115 +1,96 @@
 pipeline:
-  name: build-scan-push
-  identifier: build_scan_push
+  # EDIT: unique id for this pipeline inside the project. Letters, numbers, and underscores. No spaces.
+  identifier: Scan_Pipeline_Multiple_Scanners_For_Existing_CI_Process
+  # EDIT: name shown in the Pipelines list. Spaces are fine here.
+  name: Scan Pipeline Multiple Scanners For Existing CI Process
+  # EDIT: your Harness project identifier (Project Settings)
   projectIdentifier: <+input>
+  # EDIT: your Harness organization identifier
   orgIdentifier: <+input>
   tags: {}
-  stages:
-    - stage:
-        name: Build and Scan
-        identifier: build_and_scan
-        description: Build image, run SAST on code and SCA on container image
-        type: CI
-        spec:
-          cloneCodebase: true
-          # Use Harness Cloud for zero-infra builds — delegates and K8s clusters not needed
-          platform:
-            os: Linux
-            arch: Amd64
-          runtime:
-            type: Cloud
-            spec: {}
-          # Shared path required for any step that writes scan artifacts
-          sharedPaths:
-            - /var/run
-          execution:
-            steps:
-              # ── Step 1: SAST scan on cloned source code ──────────────────────
-              # Native Bandit step — no shell script, no custom image to maintain
-              - step:
-                  type: Bandit
-                  name: bandit_sast_scan
-                  identifier: bandit_sast_scan
-                  spec:
-                    mode: orchestration        # Runs scanner AND ingests results in one step
-                    config: default
-                    target:
-                      type: repository
-                      name: <+stage.variables.REPO_NAME>
-                      variant: <+stage.variables.BRANCH_NAME>
-                    advanced:
-                      log:
-                        level: info
-                      fail_on_severity: high   # Pipeline fails on High or Critical findings
-
-              # ── Step 2: Build and push Docker image ───────────────────────────
-              - step:
-                  type: BuildAndPushDockerRegistry
-                  name: build_and_push
-                  identifier: build_and_push
-                  spec:
-                    connectorRef: <+input>     # Your Docker Hub or ECR connector
-                    repo: <+stage.variables.IMAGE_REPO>
-                    tags:
-                      - <+stage.variables.IMAGE_TAG>
-                    dockerfile: Dockerfile
-                    context: .
-
-              # ── Step 3: Container SCA scan on the image just built ────────────
-              # Native AquaTrivy step — no DinD background step needed on Harness Cloud
-              - step:
-                  type: AquaTrivy
-                  name: trivy_container_scan
-                  identifier: trivy_container_scan
-                  spec:
-                    mode: orchestration        # Runs Trivy and ingests results in one step
-                    config: default
-                    target:
-                      type: container
-                      name: <+stage.variables.IMAGE_REPO>
-                      variant: <+stage.variables.IMAGE_TAG>
-                    image:
-                      type: local_image        # Scan the image built in the previous step
-                      name: <+stage.variables.IMAGE_REPO>
-                      tag: <+stage.variables.IMAGE_TAG>
-                    privileged: true
-                    advanced:
-                      log:
-                        level: info
-                      fail_on_severity: critical  # Only block on Critical CVEs for containers
-
-          # ── Stage Variables ──────────────────────────────────────────────────
-          # Set these as fixed values or leave as <+input> for runtime prompts
-        variables:
-          - name: REPO_NAME
-            type: String
-            description: Git repository name (used as scan target name)
-            required: true
-            value: <+input>
-          - name: BRANCH_NAME
-            type: String
-            description: Git branch being scanned (used as scan target variant)
-            required: true
-            value: <+input>
-          - name: IMAGE_REPO
-            type: String
-            description: Docker image repository (e.g., myorg/myapp)
-            required: true
-            value: <+input>
-          - name: IMAGE_TAG
-            type: String
-            description: Docker image tag (e.g., 1.0.0 or git commit SHA)
-            required: true
-            value: <+input>
-
-  # ── Codebase configuration ─────────────────────────────────────────────────
-  # Replace with your actual code connector and repository
   properties:
     ci:
       codebase:
-        connectorRef: <+input>
+        # EDIT: uncomment and set the id of your code repo connector.
+        # Use Connect through Harness Platform when this stage runs on Harness Cloud.
+        # connectorRef: YOUR_GIT_CONNECTOR
+        # INPUT at Run: repository name on that connector. <+input> prompts every run.
         repoName: <+input>
-        build:
-          type: branch
-          spec:
-            branch: <+input>
+        # INPUT at Run: branch or tag to clone. <+input> prompts every run.
+        # For a first scan, enter the root branch (main or master) so you can set it as the baseline later.
+        build: <+input>
+        # Leave empty to clone the full repository. Add paths here only for a sparse checkout.
+        sparseCheckout: []
+  stages:
+    - stage:
+        # EDIT: stage display name.
+        name: Build and Scan
+        # EDIT: unique stage id. Letters, numbers, and underscores. No spaces.
+        identifier: Build_and_Scan
+        description: ""
+        type: CI
+        spec:
+          # Keep true so the stage clones the codebase before the steps run.
+          # Gitleaks scans that checkout (default workspace /harness).
+          cloneCodebase: true
+          platform:
+            # EDIT only if your build infrastructure is not Linux AMD64.
+            os: Linux
+            arch: Amd64
+          runtime:
+            # Cloud = Harness Cloud. Change type if you use a Kubernetes build infrastructure instead.
+            type: Cloud
+            spec: {}
+          execution:
+            steps:
+              # Existing CI work. The scan step below is added after this. Do not delete your real steps.
+              - step:
+                  type: Run
+                  # EDIT: step display name.
+                  name: Install Dependency
+                  # EDIT: unique step id. Letters, numbers, and underscores. No spaces.
+                  identifier: Install_Dependency
+                  spec:
+                    shell: Sh
+                    # EDIT: replace this echo with the install, test, or build command this pipeline already runs.
+                    command: echo "Installing Dependency"
+              - step:
+                  type: Gitleaks
+                  # EDIT: step display name.
+                  name: Gitleaks
+                  # EDIT: unique step id. Letters, numbers, and underscores. No spaces.
+                  identifier: Gitleaks
+                  spec:
+                    # Orchestration runs Gitleaks and ingests results in this one step.
+                    # Ingestion is the other mode: you produce a results file yourself and point ingestion.file at it.
+                    # Auto target detection (below) works only in orchestration.
+                    mode: orchestration
+                    # Predefined scanner configuration shipped with the step. Leave default unless you have a reason to change it.
+                    config: default
+                    target:
+                      # Repository = scan the cloned source. Not a container image.
+                      type: repository
+                      # Auto fills target and variant from the clone. Leave name and variant unset.
+                      # Target  = git config --get remote.origin.url
+                      # Variant = git rev-parse --abbrev-ref HEAD (the branch that was cloned)
+                      # You are not prompted for these at Run.
+                      detection: auto
+                      # Manual alternative (do not combine with detection: auto):
+                      # name: my-repo
+                      # variant: main
+                      # Optional. Default workspace is /harness (the clone).
+                      # Set this only to scan a subdirectory or one file, for example /harness/tmp/artifacts.
+                      # workspace: /harness
+                    advanced:
+                      log:
+                        # Minimum log severity: debug, info, warning, or error.
+                        level: info
+                      # Optional. Uncomment to fail the build when a finding is at or above this severity.
+                      # Values: critical, high, medium, low, info, none.
+                      # none records findings and does not fail the build. Omit the key to leave the gate unset.
+                      # fail_on_severity: high
+                    # Optional CLI flags. Uncomment to redact secrets in the log, or to limit history.
+                    # --redact hides secret values in the step log.
+                    # --log-opts="-n 1000" scans only the last 1000 commits. Default is the full history.
+                    # settings:
+                    #   tool_args: "--redact --log-opts=\"-n 1000\""
